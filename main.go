@@ -49,16 +49,16 @@ func main() {
 		"ruleName":"One",
 	            "rule":"sku == xlsSkuCol1" ,
 		"actions":[
-		"qty =  2",
-		"flag = 1"
+		"Qty =  2",
+		"Flag = 1"
 		]
 	            },
 		{
 		"ruleName":"Two",
 		"rule":"member == xlsMemberCol1" ,
 		"actions":[
-		"points = 2",
-		"flag = 2"
+		"Points = 2",
+		"Flag = 2"
 		]
 	            }
 		],
@@ -148,11 +148,15 @@ func exe(rule string, actions []string, facts *map[string]interface{}, filters *
 	//actionTokens := make([]*ast.Expr, 0)
 
 	if eval(ruleToken, facts, filters) == "true" {
-		// for _, v := range actions {
-		// 	actionToken, _ := parser.ParseExpr(v)
-		// 	eval(actionToken, facts, filters)
-		// }
+		for _, v := range actions {
+			actionToken, _ := parser.ParseExpr(v)
+			eval(actionToken, facts, filters)
+		}
 		fmt.Println("Done")
+	}
+
+	for k, v := range facts {
+
 	}
 }
 
