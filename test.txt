@@ -1,0 +1,278 @@
+type Rule struct {
+	Name       string
+	ValidFrom  string
+	ValidTo    string
+	Conditions Conditions
+	member     []string
+	sku        []string
+	brand      []string
+	style      []string
+	color      []string
+	size       []string
+	qty        []int
+	supplier   []string
+}
+
+type Conditions struct {
+	Name    string
+	Rule    *ast.Expr
+	Actions []*ast.Expr
+}
+
+type ruleExpr struct {
+	name    string
+	rule    *ast.Expr
+	actions []*ast.Expr
+}
+
+func main() {
+
+	//	rules, _ := parser.ParseExpr("size == 20")
+	// rule1, _ := parser.ParseExpr("size = 20")
+	// rule2, _ := parser.ParseExpr("Size == 15")
+
+	rule1, _ := parser.ParseExpr(`sku == "abc" || size == 10`)
+	action1, _ := parser.ParseExpr(`Size = 15`)
+	action1a, _ := parser.ParseExpr(`Chain = rule3`)
+
+	actions1 := make([]*ast.Expr, 0)
+	actions1 = append(actions1, &action1)
+	actions1 = append(actions1, &action1a)
+
+	// rule2, _ := parser.ParseExpr(`size == 35`)
+	// action2, _ := parser.ParseExpr(`Size = 65`)
+
+	rule3, _ := parser.ParseExpr(`size == 15`)
+	action3, _ := parser.ParseExpr(`Size = 35`)
+
+	actions3 := make([]*ast.Expr, 0)
+	actions3 = append(actions3, &action3)
+	actions3 = append(actions3, &action3)
+
+	ruleExprs := make([]ruleExpr, 0)
+	ruleExprs = append(ruleExprs, ruleExpr{name: "rule1", rule: &rule1, actions: actions1})
+	// ruleExprs = append(ruleExprs, ruleExpr{name: "rule2", rule: &rule2, action: action2, chain: ""})
+	ruleExprs = append(ruleExprs, ruleExpr{name: "rule3", rule: &rule3, actions: actions3})
+
+	// rule1, _ := parser.ParseExpr(`sku == "abc" && size == 10`)
+	// action1, _ := parser.ParseExpr(`Size = 15`)
+
+	// fs := token.NewFileSet()
+	// ast.Print(fs, rule3)
+
+	facts := make(map[string]string)
+	facts["sku"] = "abc"
+	facts["size"] = "12"
+
+	// fmt.Println(Eval(rule1, &facts))
+
+	// if Eval(rule1, &facts) == "true" {
+	// 	Eval(action1, &facts)
+	// }
+
+	fmt.Printf("%s\n", facts["size"])
+
+	ruleIdx := 0
+
+	for {
+
+		rule := ruleExprs[ruleIdx].rule
+		if Eval(*rule, &facts) == "true" {
+			for i := 0; i < len(ruleExprs[ruleIdx].actions); i++ {
+				action := ruleExprs[ruleIdx].actions[i]
+				facts["chain"] = ""
+				Eval(*action, &facts)
+			}
+
+		}
+
+		if facts["chain"] == "" {
+			break
+		} else {
+			for i, v := range ruleExprs {
+				if v.name == facts["chain"] {
+					ruleIdx = i
+				}
+			}
+		}
+
+	}
+
+	// for _, r := range ruleExprs {
+	// 	if Eval(*r.rule, &facts) != "true" {
+	// 		Eval(*r.action, &facts)
+	// 	}
+
+	// 	if
+	// }
+
+	fmt.Printf("%s\n", facts["size"])
+
+	// }
+
+	//fmt.Printf("%s\n", Eval(rule3, &facts))
+
+	// fmt.Printf("%s\n", Eval(rule2, &facts))
+
+	//	fmt.Printf("%d\n", facts.size)
+
+}
+
+func Eval(exp ast.Expr, facts *map[string]string) string {
+	switch exp := exp.(type) {
+	case *ast.BinaryExpr:
+		return EvalBinaryExpr(exp, facts)
+	case *ast.BasicLit:
+		switch exp.Kind {
+		case token.INT:
+			return exp.Value
+		case token.STRING:
+			return strings.ReplaceAll(exp.Value, "\"", "")
+		}
+	case *ast.ParenExpr:
+		return Eval(exp.X, facts)
+	case *ast.Ident:
+		return exp.Name
+
+	}
+
+	return ""
+}
+
+func EvalBinaryExpr(exp *ast.BinaryExpr, facts *map[string]string) string {
+	left := Eval(exp.X, facts)
+	right := Eval(exp.Y, facts)
+
+	switch exp.Op {
+	case token.ADD:
+		l, _ := strconv.Atoi(left)
+		r, _ := strconv.Atoi(right)
+		return strconv.Itoa(l + r)
+	case token.SUB:
+		l, _ := strconv.Atoi(left)
+		r, _ := strconv.Atoi(right)
+		return strconv.Itoa(l - r)
+	case token.MUL:
+		l, _ := strconv.Atoi(left)
+		r, _ := strconv.Atoi(right)
+		return strconv.Itoa(l * r)
+	case token.QUO:
+		l, _ := strconv.Atoi(left)
+		r, _ := strconv.Atoi(right)
+		return strconv.Itoa(l / r)
+	case token.LAND:
+		if left == "true" && right == "true" {
+			return "true"
+		} else {
+			return "false"
+		}
+	case token.LOR:
+		if left == "true" || right == "true" {
+			return "true"
+		} else {
+			return "false"
+		}
+	case token.EQL:
+		// Upper
+		if left[0:1] == strings.ToUpper(string(left[0:1])) {
+			(*facts)[strings.ToLower(string(left))] = right
+		} else {
+			isEql := (*facts)[left] == right
+			if isEql {
+				return "true"
+			} else {
+				return "false"
+			}
+		}
+
+	}
+
+	return "0"
+}
+
+//----------------------------------
+// func Eval(exp ast.Expr) int {
+// 	switch exp := exp.(type) {
+// 	case *ast.BinaryExpr:
+// 		return EvalBinaryExpr(exp)
+// 	case *ast.BasicLit:
+// 		switch exp.Kind {
+// 		case token.INT:
+// 			i, _ := strconv.Atoi(exp.Value)
+// 			return i
+// 		}
+// 	case *ast.ParenExpr:
+
+// 		return Eval(exp.X)
+
+// 	}
+
+// 	return 0
+// }
+
+// func EvalBinaryExpr(exp *ast.BinaryExpr) int {
+// 	left := Eval(exp.X)
+// 	right := Eval(exp.Y)
+
+// 	switch exp.Op {
+// 	case token.ADD:
+// 		return left + right
+// 	case token.SUB:
+// 		return left - right
+// 	case token.MUL:
+// 		return left * right
+// 	case token.QUO:
+// 		return left / right
+// 	}
+
+// 	return 0
+// }
+
+// func Eval(exp ast.Expr, data dataIntf) anyType {
+// 	switch exp := exp.(type) {
+// 	case *ast.BinaryExpr:
+// 		return EvalBinaryExpr(exp, data)
+// 	case *ast.Ident:
+// 		return data.GetValue("sku")
+
+// 	case *ast.BasicLit:
+// 		switch exp.Kind {
+// 		case token.INT:
+// 			//i, _ := strconv.Atoi(exp.Value)
+// 			return exp.Value
+
+// 		case token.STRING:
+// 			return strings.ReplaceAll(exp.Value, "\"", "")
+// 		}
+// 	}
+
+// 	return ""
+// }
+
+// func EvalBinaryExpr(exp *ast.BinaryExpr, data dataIntf) string {
+// 	left := Eval(exp.X, data)
+// 	right := Eval(exp.Y, data)
+
+// 	switch exp.Op {
+// 	case token.ADD:
+// 		l, _ := strconv.Atoi(left)
+// 		r, _ := strconv.Atoi(right)
+// 		return strconv.Itoa(l + r)
+// 	case token.SUB:
+// 		l, _ := strconv.Atoi(left)
+// 		r, _ := strconv.Atoi(right)
+// 		return strconv.Itoa(l - r)
+// 	case token.MUL:
+// 		l, _ := strconv.Atoi(left)
+// 		r, _ := strconv.Atoi(right)
+// 		return strconv.Itoa(l * r)
+// 	case token.QUO:
+// 		l, _ := strconv.Atoi(left)
+// 		r, _ := strconv.Atoi(right)
+// 		return strconv.Itoa(l / r)
+// 	case token.EQL:
+// 		return strconv.FormatBool(left == right)
+// 	}
+
+// 	return ""
+// }
