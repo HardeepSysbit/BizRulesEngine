@@ -6,8 +6,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"log"
 	"strconv"
 	"strings"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 type Promo struct {
@@ -24,20 +27,17 @@ type ruleSet struct {
 	Actions  []string `json:"actions"`
 }
 
-// type rule struct {
-// 	Name      string    `json:"name"`
-// 	ValidFrom string    `json:"validFrom"`
-// 	ValidTo   string    `json:"validTo"`
-// 	RuleBox   []ruleBox `json:"rule"`
-// 	Filters   []string  `json:"filters"`
-// }
+type node struct {
+	name       string
+	expr       ast.Expr
+	actionExpr []ast.Expr
+}
 
-// type ruleBox struct {
-// 	RuleCmd    string   `json:"ruleCmd"`
-// 	RuleAction []string `json:"ruleAction"`
-// }
+var nodes map[string]*node
+var promo Promo
+var filters map[string]struct{}
 
-func main() {
+func savePromo() {
 
 	promoBody := []byte(`
 	{
@@ -47,18 +47,18 @@ func main() {
 		"ruleSet":[
 		{
 		"ruleName":"One",
-	            "rule":"sku == xlsSkuCol1" ,
+	            "rule":"sku == xlsSkuCol1 && member == Gold" ,
 		"actions":[
-		"Qty =  2",
-		"Flag = 1"
+		"Discount == 10/100 * price",
+	 	"FinalPrice == price - discount"
 		]
 	            },
 		{
 		"ruleName":"Two",
 		"rule":"member == xlsMemberCol1" ,
 		"actions":[
-		"Points = 2",
-		"Flag = 2"
+		"Points == 3",
+		"Flag == 2"
 		]
 	            }
 		],
@@ -71,142 +71,213 @@ func main() {
 
 	`)
 
-	// promoBody := []byte(`
-	// {
-	// 	"promoName":"Season 1",
-	// 	"validFrom":"20210501",
-	// 	"validTo":"20210531",
-	// 	"ruleSet":[
-	// 	{
-	// 	"ruleName":"Two",
-	//  	"rule":"member == xlsMemberCol1" ,
-	// 	"actions":[
-	// 	"points = points * 2",
-	// 	"flag = 2"
-	// 	]
-	//             }
-	// 	],
-	// 	"filters":[
-	// 	"xlsSkuCol1-ADI123456WHTXXL",
-	// 	"xlsSkuCol1-ADI123457WHTXXL",
-	// 	"xlsMemberCol1-Gold"
-	// 	]
-	// 	}
-
-	// `)
-
-	factBody := `{
-        "sku" : "ADI123456WHTXXL",
-        "member" : "Gold"
-    }`
-
-	var promo Promo
-	var facts map[string]interface{}
-
 	var empty struct{}
-	filters := make(map[string]struct{})
 
+	filters = make(map[string]struct{})
+
+	// Unmarshall
 	json.Unmarshal(promoBody, &promo)
-	json.Unmarshal([]byte(factBody), &facts)
 
+	// Seup the dimensions
 	for _, v := range promo.Filters {
-		//	fmt.Printf("Filters: %s\n", v)
 		filters[v] = empty
 	}
 
-	for _, v := range promo.RuleSet {
+	// Create AST nodes
+	compile()
 
-		fmt.Printf("RuleName: %s\n", v.RuleName)
-		fmt.Printf("Rule: %s\n", v.Rule)
+}
 
-		for _, a := range v.Actions {
-			fmt.Printf("Action: %s\n", a)
+func main() {
+
+	savePromo()
+
+	for {
+		// fmt.Println("Press any key")
+		// scanner := bufio.NewScanner(os.Stdin)
+		// scanner.Scan()
+		compute()
+	}
+}
+
+func compile() {
+
+	nodes = make(map[string]*node)
+
+	for _, rule := range promo.RuleSet {
+
+		ruleExpr, ruleErr := parser.ParseExpr(rule.Rule)
+		if ruleErr != nil {
+			log.Fatal(ruleErr)
 		}
 
-		// strs := strings.Split(v.Rule, " ")
-		// key := fmt.Sprintf("%s.%s", strs[2], facts[strs[0]])
-		// fmt.Printf("key: %s\n", key)
-		// _, ok := filters[key]
+		spew.Dump(ruleExpr)
 
-		// if ok {
-		// 	fmt.Println("ok")
-		// } else {
-		// 	fmt.Println("nok")
-		// }
+		nodes[rule.RuleName] = &node{name: rule.RuleName, expr: ruleExpr}
 
-		exe(v.Rule, v.Actions, &facts, &filters)
+		for _, action := range rule.Actions {
+			actionExpr, actionErr := parser.ParseExpr(action)
+
+			spew.Dump(actionExpr)
+
+			if actionErr != nil {
+				log.Fatal(actionErr)
+			}
+
+			nodes[rule.RuleName].actionExpr = append(nodes[rule.RuleName].actionExpr, actionExpr)
+		}
+
+	}
+
+}
+
+func compute() {
+
+	factBody := `{
+        "sku" : "ADI123456WHTXXL",
+        "member" : "Gold",
+		"qty" : "3",
+		"price" : "100"
+    }`
+
+	var facts map[string]string
+
+	// Unmarshall
+	json.Unmarshal([]byte(factBody), &facts)
+
+	// Seyp trace
+	facts["trace"] = ""
+
+	// Traverse through all rules in the ruleset
+	for _, v := range promo.RuleSet {
+
+		fmt.Println("Before")
+
+		for k, v := range facts {
+			fmt.Printf("%s = %s\n", k, v)
+		}
+
+		exeNode(v.RuleName, v.Actions, &facts, &filters)
+
+		fmt.Println()
+
+		fmt.Println("After")
+
+		for k, v := range facts {
+			fmt.Printf("%s = %s\n", k, v)
+		}
 
 		fmt.Println()
 	}
 
 }
 
-func exe(rule string, actions []string, facts *map[string]interface{}, filters *map[string]struct{}) {
+func exeNode(ruleName string, actions []string, facts *map[string]string, filters *map[string]struct{}) {
 
-	ruleToken, _ := parser.ParseExpr(rule)
+	nodex := nodes[ruleName]
+	rule := nodex.expr
 
-	//actionTokens := make([]*ast.Expr, 0)
+	if eval(rule, true, true, 0, facts, filters) == "true" {
 
-	if eval(ruleToken, facts, filters) == "true" {
-		for _, v := range actions {
-			actionToken, _ := parser.ParseExpr(v)
-			eval(actionToken, facts, filters)
+		(*facts)["trace"] = (*facts)["trace"] + " -> " + ruleName
+
+		for _, action := range nodex.actionExpr {
+			eval(action, false, true, 0, facts, filters)
 		}
+
 		fmt.Println("Done")
 	}
 
-	for k, v := range facts {
-
-	}
 }
 
-func eval(exp ast.Expr, facts *map[string]interface{}, filters *map[string]struct{}) string {
+func eval(exp ast.Expr, isRule bool, isLeft bool, cnt int, facts *map[string]string, filters *map[string]struct{}) string {
 	switch exp := exp.(type) {
 	case *ast.BinaryExpr:
-		return evalBinaryExpr(exp, facts, filters)
+		return evalBinaryExpr(exp, isRule, isLeft, cnt, facts, filters)
 	case *ast.BasicLit:
 		switch exp.Kind {
 		case token.INT:
 			return exp.Value
 		case token.STRING:
-			return strings.ReplaceAll(exp.Value, "\"", "")
+			return exp.Value
 		}
 	case *ast.ParenExpr:
-		return eval(exp.X, facts, filters)
+		return eval(exp.X, isRule, isLeft, cnt, facts, filters)
 	case *ast.Ident:
-		// v, exist := (*facts)[exp.Name]
-		// if exist {
-		// 	return fmt.Sprintf("%v", v)
-		// } else {
-		// 	return exp.Name
-		// }
-		return exp.Name
-	}
 
+		// Assignment
+		if isRule {
+			return exp.Name
+		} else {
+			if exp.Name[0:1] == strings.ToUpper(string(exp.Name[0:1])) {
+				return strings.ToLower(exp.Name)
+			} else {
+				v, exist := (*facts)[exp.Name]
+				if exist {
+					return fmt.Sprintf("%v", v)
+				} else {
+					return exp.Name
+				}
+			}
+			// 	if !isRule {
+			// 		if cnt == 1 {
+			// 			return exp.Name
+			// 		} else {
+			// 			v, exist := (*facts)[exp.Name]
+			// 			if exist {
+			// 				return fmt.Sprintf("%v", v)
+			// 			} else {
+			// 				return exp.Name
+			// 			}
+			// 		}
+			// 	} else {
+			// 		v, exist := (*facts)[exp.Name]
+			// 		if exist {
+			// 			return fmt.Sprintf("%v", v)
+			// 		} else {
+			// 			return exp.Name
+			// 		}
+			// 	}
+			// }
+		}
+	}
 	return ""
 }
 
-func evalBinaryExpr(exp *ast.BinaryExpr, facts *map[string]interface{}, filters *map[string]struct{}) string {
-	left := eval(exp.X, facts, filters)
-	right := eval(exp.Y, facts, filters)
+func evalBinaryExpr(exp *ast.BinaryExpr, isRule bool, isLeft bool, cnt int, facts *map[string]string, filters *map[string]struct{}) string {
+
+	left := eval(exp.X, isRule, true, cnt+1, facts, filters)
+	right := eval(exp.Y, isRule, false, cnt+1, facts, filters)
 
 	switch exp.Op {
 	case token.ADD:
-		l, _ := strconv.Atoi(left)
-		r, _ := strconv.Atoi(right)
-		return strconv.Itoa(l + r)
+		leftFloat := strToFloat64(left)
+		rightFloat := strToFloat64(right)
+
+		ans := leftFloat + rightFloat
+
+		return fmt.Sprintf("%.2f", ans)
 	case token.SUB:
-		l, _ := strconv.Atoi(left)
-		r, _ := strconv.Atoi(right)
-		return strconv.Itoa(l - r)
+		leftFloat := strToFloat64(left)
+		rightFloat := strToFloat64(right)
+
+		ans := leftFloat - rightFloat
+
+		return fmt.Sprintf("%.2f", ans)
 	case token.MUL:
-		l, _ := strconv.Atoi(left)
-		r, _ := strconv.Atoi(right)
-		return strconv.Itoa(l * r)
+		leftFloat := strToFloat64(left)
+		rightFloat := strToFloat64(right)
+
+		ans := leftFloat * rightFloat
+
+		return fmt.Sprintf("%.2f", ans)
 	case token.QUO:
-		l, _ := strconv.Atoi(left)
-		r, _ := strconv.Atoi(right)
-		return strconv.Itoa(l / r)
+		leftFloat := strToFloat64(left)
+		rightFloat := strToFloat64(right)
+
+		ans := leftFloat / rightFloat
+
+		return fmt.Sprintf("%.2f", ans)
 	case token.LAND:
 		if left == "true" && right == "true" {
 			return "true"
@@ -220,33 +291,50 @@ func evalBinaryExpr(exp *ast.BinaryExpr, facts *map[string]interface{}, filters 
 			return "false"
 		}
 	case token.EQL:
-		// Assign
-		if left[0:1] == strings.ToUpper(string(left[0:1])) {
-			(*facts)[strings.ToLower(string(left))] = right
-		} else if right[0:3] == "xls" {
-			v, exist := (*facts)[left]
-			if exist {
-				key := fmt.Sprintf("%s-%v", right, v)
-				_, x := (*filters)[key]
-				if x {
+		// Rule or Action
+		if isRule {
+			// Check Dimension
+			if strings.HasPrefix(right, "xls") {
+				v, exist := (*facts)[left]
+				if exist {
+					key := fmt.Sprintf("%s-%v", right, v)
+					_, x := (*filters)[key]
+					if x {
+						return "true"
+					} else {
+						return "false"
+					}
+
+				} else {
+					return "false"
+				}
+			} else {
+
+				isEql := (*facts)[left] == right
+
+				if isEql {
 					return "true"
 				} else {
 					return "false"
 				}
 
-			} else {
-				return "false"
 			}
+
 		} else {
-			isEql := (*facts)[left] == right
-			if isEql {
-				return "true"
-			} else {
-				return "false"
-			}
+			// Assignment
+			(*facts)[strings.ToLower(string(left))] = right
 		}
 
 	}
 
 	return ""
+}
+
+func strToFloat64(value string) float64 {
+	floatNbr, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		log.Fatalf("Unable to convert %v to float", value)
+	}
+
+	return floatNbr
 }

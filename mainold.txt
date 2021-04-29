@@ -1,16 +1,19 @@
+
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
+	"strings"
+)
+
 type Rule struct {
 	Name       string
 	ValidFrom  string
 	ValidTo    string
 	Conditions Conditions
-	member     []string
-	sku        []string
-	brand      []string
-	style      []string
-	color      []string
-	size       []string
-	qty        []int
-	supplier   []string
 }
 
 type Conditions struct {
